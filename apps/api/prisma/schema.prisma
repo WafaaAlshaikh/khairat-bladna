@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * ====================
+ * AUTH
+ * ====================
+ */
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(USER)
+
+  refreshTokens RefreshToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RefreshToken {
+  id    String @id @default(uuid())
+  token String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  deviceInfo String?
+
+  createdAt DateTime @default(now())
+}
+
+/**
+ * ====================
+ * PRODUCTS
+ * ====================
+ */
+
+model Product {
+  id String @id @default(uuid())
+
+  name String
+
+  description String?
+
+  status ProductStatus @default(ACTIVE)
+
+  variants ProductVariant[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductVariant {
+  id String @id @default(uuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  name String
+
+  sku String @unique
+
+  price Decimal
+
+  priceHistory ProductPriceHistory[]
+
+  warehouseProducts WarehouseProduct[]
+
+  reservations StockReservation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductPriceHistory {
+  id String @id @default(uuid())
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  oldPrice Decimal
+  newPrice Decimal
+
+  changedAt DateTime @default(now())
+}
+
+/**
+ * ====================
+ * INVENTORY
+ * ====================
+ */
+
+model Warehouse {
+  id String @id @default(uuid())
+
+  name String
+
+  products WarehouseProduct[]
+
+  reservations StockReservation[]
+
+  createdAt DateTime @default(now())
+}
+
+model WarehouseProduct {
+  id String @id @default(uuid())
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  quantity Int @default(0)
+
+  reservedQuantity Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([warehouseId, variantId])
+}
+
+model StockReservation {
+  id String @id @default(uuid())
+
+  orderId String?
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  quantity Int
+
+  status ReservationStatus @default(PENDING)
+
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+/**
+ * ====================
+ * APPROVAL MVP
+ * ====================
+ */
+
+model ApprovalRequest {
+  id String @id @default(uuid())
+
+  type ApprovalType
+
+  entityId String
+
+  status ApprovalStatus @default(PENDING)
+
+  requestedBy String
+
+  approvedBy String?
+
+  note String?
+
+  createdAt DateTime @default(now())
+}
+
+/**
+ * ====================
+ * ENUMS
+ * ====================
+ */
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+  USER
+}
+
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  RELEASED
+}
+
+enum ApprovalType {
+  PRICE_CHANGE
+  STOCK_ADJUSTMENT
+  PRODUCT_UPDATE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
