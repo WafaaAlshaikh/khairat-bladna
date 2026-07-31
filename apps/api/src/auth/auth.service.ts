@@ -1,17 +1,31 @@
 import {
-  Injectable,
   ConflictException,
+  Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 
 import { PrismaService } from '../common/prisma/prisma.service';
+
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
+
 import { JwtService } from '@nestjs/jwt';
-import { User, RefreshToken } from '@prisma/client';
+import type { User } from '@prisma/client';
+
+type UserResponse = {
+  id: string;
+  email: string;
+  name: string;
+  phone: string | null;
+  avatar: string | null;
+  role: User['role'];
+  isActive: boolean;
+  createdAt: Date;
+};
 
 @Injectable()
 export class AuthService {
@@ -39,14 +53,20 @@ export class AuthService {
         name: dto.name,
         passwordHash,
       },
+
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        avatar: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+      },
     });
 
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-    };
+    return user;
   }
 
   async login(dto: LoginDto) {
@@ -71,36 +91,44 @@ export class AuthService {
     return {
       ...tokens,
 
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-      },
+      user: this.mapUserResponse(user),
     };
   }
 
   async refresh(dto: RefreshTokenDto) {
-    const hashedTokens = await this.prisma.refreshToken.findMany({
+    const tokens = await this.prisma.refreshToken.findMany({
       where: {
         revokedAt: null,
+
         expiresAt: {
           gt: new Date(),
         },
       },
 
       include: {
-        user: true,
+        user: {
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            phone: true,
+            avatar: true,
+            isActive: true,
+            createdAt: true,
+          },
+        },
       },
     });
 
-    let storedToken: (RefreshToken & { user: User }) | null = null;
+    let storedToken: (typeof tokens)[number] | null = null;
 
-    for (const token of hashedTokens) {
-      const match = await bcrypt.compare(dto.refreshToken, token.token);
+    for (const token of tokens) {
+      const isValid = await bcrypt.compare(dto.refreshToken, token.token);
 
-      if (match) {
+      if (isValid) {
         storedToken = token;
+
         break;
       }
     }
@@ -130,9 +158,9 @@ export class AuthService {
     });
 
     for (const token of tokens) {
-      const match = await bcrypt.compare(dto.refreshToken, token.token);
+      const isValid = await bcrypt.compare(dto.refreshToken, token.token);
 
-      if (match) {
+      if (isValid) {
         await this.prisma.refreshToken.update({
           where: {
             id: token.id,
@@ -152,7 +180,11 @@ export class AuthService {
     };
   }
 
-  private async generateTokens(user: User) {
+  private async generateTokens(user: {
+    id: string;
+    email: string;
+    role: User['role'];
+  }) {
     const payload = {
       sub: user.id,
       email: user.email,
@@ -177,8 +209,27 @@ export class AuthService {
 
     return {
       accessToken,
-
       refreshToken,
+    };
+  }
+
+  private mapUserResponse(user: User): UserResponse {
+    return {
+      id: user.id,
+
+      email: user.email,
+
+      name: user.name,
+
+      phone: user.phone,
+
+      avatar: user.avatar,
+
+      role: user.role,
+
+      isActive: user.isActive,
+
+      createdAt: user.createdAt,
     };
   }
 }

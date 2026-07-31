@@ -14,12 +14,18 @@ datasource db {
  */
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
+  id String @id @default(uuid())
+
+  email        String @unique
   passwordHash String
-  name         String
-  role         UserRole @default(USER)
-  isActive     Boolean @default(true)
+
+  name   String
+  phone  String?
+  avatar String?
+
+  role UserRole @default(USER)
+
+  isActive Boolean @default(true)
 
   refreshTokens RefreshToken[]
 
@@ -28,17 +34,22 @@ model User {
 }
 
 model RefreshToken {
-  id    String @id @default(uuid())
+  id String @id @default(uuid())
+
   token String @unique
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  expiresAt  DateTime
-  revokedAt  DateTime?
+  expiresAt DateTime
+
+  revokedAt DateTime?
+
   deviceInfo String?
 
   createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 /**

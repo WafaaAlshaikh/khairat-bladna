@@ -5,14 +5,16 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 
-import { envValidationSchema } from './common/config/env.validation';
+import { validateEnv } from './common/config/env.validation';
+import jwtConfig from './common/config/jwt.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
 
-      validationSchema: envValidationSchema,
+      validate: validateEnv,
+      load: [jwtConfig],
     }),
 
     PrismaModule,

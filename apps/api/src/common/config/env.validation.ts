@@ -1,17 +1,39 @@
-import Joi from 'joi';
+import * as Joi from 'joi';
 
-export const envValidationSchema = Joi.object({
-  NODE_ENV: Joi.string()
-    .valid('development', 'production', 'test')
-    .default('development'),
+interface EnvConfig {
+  NODE_ENV: string;
+  PORT: number;
+  DATABASE_URL: string;
+  JWT_SECRET: string;
+  JWT_ACCESS_EXPIRES: string;
+  JWT_REFRESH_EXPIRES: string;
+}
 
-  PORT: Joi.number().default(3000),
+export function validateEnv(config: Record<string, unknown>): EnvConfig {
+  const schema = Joi.object<EnvConfig>({
+    NODE_ENV: Joi.string()
+      .valid('development', 'production', 'test')
+      .default('development'),
 
-  DATABASE_URL: Joi.string().required(),
+    PORT: Joi.number().default(3000),
 
-  JWT_SECRET: Joi.string().min(10).required(),
+    DATABASE_URL: Joi.string().required(),
 
-  JWT_ACCESS_EXPIRES: Joi.string().default('15m'),
+    JWT_SECRET: Joi.string().min(10).required(),
 
-  JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
-});
+    JWT_ACCESS_EXPIRES: Joi.string().default('15m'),
+
+    JWT_REFRESH_EXPIRES: Joi.string().default('30d'),
+  });
+
+  const result = schema.validate(config, {
+    abortEarly: false,
+    allowUnknown: true,
+  });
+
+  if (result.error) {
+    throw new Error(`Environment validation failed: ${result.error.message}`);
+  }
+
+  return result.value;
+}
