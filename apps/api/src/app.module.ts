@@ -6,6 +6,7 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 
 import { validateEnv } from './common/config/env.validation';
+import { CategoriesModule } from './categories/categories.module';
 import jwtConfig from './common/config/jwt.config';
 
 @Module({
@@ -20,6 +21,7 @@ import jwtConfig from './common/config/jwt.config';
     PrismaModule,
     UsersModule,
     AuthModule,
+    CategoriesModule,
   ],
 })
 export class AppModule {}

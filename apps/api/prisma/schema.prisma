@@ -58,7 +58,7 @@ model RefreshToken {
  * ====================
  */
 
- model Category {
+model Category {
   id String @id @default(uuid())
 
   name String
