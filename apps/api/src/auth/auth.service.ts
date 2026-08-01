@@ -14,7 +14,13 @@ import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
 
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import type { User } from '@prisma/client';
+
+interface RefreshTokenPayload {
+  sub: string;
+  jti: string;
+}
 
 type UserResponse = {
   id: string;
@@ -32,6 +38,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -52,8 +59,8 @@ export class AuthService {
         email: dto.email,
         name: dto.name,
         passwordHash,
+        phone: dto.phone,
       },
-
       select: {
         id: true,
         email: true,
@@ -80,6 +87,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (!user.isActive) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+
     const passwordMatch = await bcrypt.compare(dto.password, user.passwordHash);
 
     if (!passwordMatch) {
@@ -90,21 +101,28 @@ export class AuthService {
 
     return {
       ...tokens,
-
       user: this.mapUserResponse(user),
     };
   }
 
   async refresh(dto: RefreshTokenDto) {
-    const tokens = await this.prisma.refreshToken.findMany({
-      where: {
-        revokedAt: null,
-
-        expiresAt: {
-          gt: new Date(),
+    let refreshTokenId: string;
+    try {
+      const payload = this.jwtService.verify<RefreshTokenPayload>(
+        dto.refreshToken,
+        {
+          secret: this.configService.get<string>('jwt.refreshSecret'),
         },
-      },
+      );
+      refreshTokenId = payload.jti;
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
 
+    const storedToken = await this.prisma.refreshToken.findUnique({
+      where: {
+        id: refreshTokenId,
+      },
       include: {
         user: {
           select: {
@@ -121,19 +139,20 @@ export class AuthService {
       },
     });
 
-    let storedToken: (typeof tokens)[number] | null = null;
-
-    for (const token of tokens) {
-      const isValid = await bcrypt.compare(dto.refreshToken, token.token);
-
-      if (isValid) {
-        storedToken = token;
-
-        break;
-      }
+    if (!storedToken) {
+      throw new UnauthorizedException('Refresh token not found');
     }
 
-    if (!storedToken) {
+    if (storedToken.revokedAt) {
+      throw new UnauthorizedException('Refresh token has been revoked');
+    }
+
+    if (storedToken.expiresAt < new Date()) {
+      throw new UnauthorizedException('Refresh token has expired');
+    }
+
+    const isValid = await bcrypt.compare(dto.refreshToken, storedToken.token);
+    if (!isValid) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -141,7 +160,6 @@ export class AuthService {
       where: {
         id: storedToken.id,
       },
-
       data: {
         revokedAt: new Date(),
       },
@@ -151,32 +169,56 @@ export class AuthService {
   }
 
   async logout(dto: RefreshTokenDto) {
-    const tokens = await this.prisma.refreshToken.findMany({
+    let refreshTokenId: string;
+    try {
+      const payload = this.jwtService.verify<RefreshTokenPayload>(
+        dto.refreshToken,
+        {
+          secret: this.configService.get<string>('jwt.refreshSecret'),
+        },
+      );
+      refreshTokenId = payload.jti;
+    } catch {
+      return {
+        message: 'Logged out successfully',
+      };
+    }
+
+    const storedToken = await this.prisma.refreshToken.findUnique({
       where: {
-        revokedAt: null,
+        id: refreshTokenId,
       },
     });
 
-    for (const token of tokens) {
-      const isValid = await bcrypt.compare(dto.refreshToken, token.token);
-
-      if (isValid) {
-        await this.prisma.refreshToken.update({
-          where: {
-            id: token.id,
-          },
-
-          data: {
-            revokedAt: new Date(),
-          },
-        });
-
-        break;
-      }
+    if (storedToken && !storedToken.revokedAt) {
+      await this.prisma.refreshToken.update({
+        where: {
+          id: storedToken.id,
+        },
+        data: {
+          revokedAt: new Date(),
+        },
+      });
     }
 
     return {
       message: 'Logged out successfully',
+    };
+  }
+
+  async logoutAllDevices(userId: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    return {
+      message: 'Logged out from all devices successfully',
     };
   }
 
@@ -185,25 +227,41 @@ export class AuthService {
     email: string;
     role: User['role'];
   }) {
-    const payload = {
+    const accessPayload = {
       sub: user.id,
       email: user.email,
       role: user.role,
     };
 
-    const accessToken = await this.jwtService.signAsync(payload);
+    const refreshTokenId = randomUUID();
 
-    const refreshToken = randomUUID();
+    const refreshPayload = {
+      sub: user.id,
+      jti: refreshTokenId,
+    };
+
+    const accessToken = await this.jwtService.signAsync(accessPayload);
+
+    const refreshSecret = this.configService.get<string>('jwt.refreshSecret');
+    const refreshExpires =
+      this.configService.get<string>('jwt.refreshExpires') || '30d';
+
+    const refreshToken = await this.jwtService.signAsync(refreshPayload, {
+      secret: refreshSecret,
+      expiresIn: refreshExpires,
+    } as any);
 
     const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
+    const days = parseInt(refreshExpires.replace('d', '')) || 30;
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * days);
+
     await this.prisma.refreshToken.create({
       data: {
+        id: refreshTokenId,
         token: hashedRefreshToken,
-
         userId: user.id,
-
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 30),
+        expiresAt,
       },
     });
 
@@ -216,19 +274,12 @@ export class AuthService {
   private mapUserResponse(user: User): UserResponse {
     return {
       id: user.id,
-
       email: user.email,
-
       name: user.name,
-
       phone: user.phone,
-
       avatar: user.avatar,
-
       role: user.role,
-
       isActive: user.isActive,
-
       createdAt: user.createdAt,
     };
   }
